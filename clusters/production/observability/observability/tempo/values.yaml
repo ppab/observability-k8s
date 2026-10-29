@@ -1,0 +1,12 @@
+# grafana/tempo (monolithic) — shared values.
+# Receives OTLP from the collector on tempo:4317; Grafana queries tempo:3200.
+fullnameOverride: tempo
+
+tempo:
+  reportingEnabled: false
+  # The chart's default receivers stay (its Service template reads the Jaeger
+  # block); only OTLP on 4317 is used, by the collector.
+  # Storage backend and retention are environment decisions (local + PVC in
+  # develop, S3 in cloud) and live in the overlay.
+  metricsGenerator:
+    enabled: false
