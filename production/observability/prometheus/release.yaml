@@ -28,14 +28,8 @@ spec:
       fullnameOverride: prometheus
       extraFlags:
         - web.enable-lifecycle
-        - web.enable-otlp-receiver
-      otlp:
-        promote_resource_attributes:
-          - service.name
-          - service.version
-          - service.instance.id
-      tsdb:
-        out_of_order_time_window: 30m
+        - enable-feature=otlp-write-receiver
+        - storage.tsdb.out-of-order-time-window=30m
       global:
         scrape_interval: 15s
       service:
