@@ -43,7 +43,15 @@ spec:
               nodeGraph:
                 enabled: true
 
+    ingress:
+      enabled: true
+      ingressClassName: traefik
+      hosts:
+        - grafana.monitorapp.io
+
     grafana.ini:
+      server:
+        root_url: https://grafana.monitorapp.io
       analytics:
         check_for_updates: false
         reporting_enabled: false
