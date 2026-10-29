@@ -43,6 +43,16 @@ spec:
       zipkin:
         enabled: false
 
+    ingress:
+      enabled: true
+      ingressClassName: traefik
+      hosts:
+        - host: otel-collector.monitorapp.internal
+          paths:
+            - path: /
+              pathType: Prefix
+              port: 4318
+
     config:
       receivers:
         jaeger: null
