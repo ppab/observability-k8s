@@ -8,7 +8,7 @@ spec:
   chart:
     spec:
       chart: prometheus
-      version: ">=25.0.0 <26.0.0"
+      version: ">=29.0.0 <30.0.0"
       sourceRef:
         kind: HelmRepository
         name: prometheus-community
@@ -28,7 +28,14 @@ spec:
       fullnameOverride: prometheus
       extraFlags:
         - web.enable-lifecycle
-        - enable-feature=otlp-write-receiver
+        - web.enable-otlp-receiver
+      otlp:
+        promote_resource_attributes:
+          - service.name
+          - service.version
+          - service.instance.id
+      tsdb:
+        out_of_order_time_window: 30m
       global:
         scrape_interval: 15s
       service:
