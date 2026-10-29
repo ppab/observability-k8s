@@ -29,7 +29,6 @@ spec:
       extraFlags:
         - web.enable-lifecycle
         - enable-feature=otlp-write-receiver
-        - storage.tsdb.out-of-order-time-window=30m
       global:
         scrape_interval: 15s
       service:
