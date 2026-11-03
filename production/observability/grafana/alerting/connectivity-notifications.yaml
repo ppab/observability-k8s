@@ -1,0 +1,90 @@
+# Where the connectivity alerts go: contact points, the notification policy
+# tree and mute timings, provisioned as code (hardening plan Phase 2 #2).
+#
+# Same mechanics as connectivity-rules.yaml: a Helm values fragment merged
+# through the HelmRelease `valuesFrom`, written by the chart to
+# /etc/grafana/provisioning/alerting/ and loaded at start.
+#
+# Secrets never live in this repo. The chart's `envFromSecret` (release.yaml)
+# turns every key of the Secret `grafana-alerting-secrets` into an environment
+# variable of the Grafana pod, and Grafana expands `$NAME` in provisioning
+# files at load time. Create or rotate it on the cluster:
+#
+#   kubectl -n observability create secret generic grafana-alerting-secrets \
+#     --from-literal=SLACK_WEBHOOK_URL='https://hooks.slack.com/services/...'
+#
+# then restart the pod (`kubectl -n observability rollout restart deploy/grafana`)
+# — env vars are read at start only. A missing Secret keeps the pod from
+# starting (CreateContainerConfigError); a missing key leaves the webhook
+# empty and the contact point fails validation at boot. Both are loud.
+#
+# Rules of the file:
+# - `policies` REPLACES the whole notification policy tree. The root route
+#   catches everything (including alerts that are not ours yet) so nothing is
+#   dropped; connectivity alerts are matched by `family=connectivity` (set on
+#   every rule) and grouped per rule and service.
+# - Messages use Grafana's default notification template (title, labels,
+#   annotations summary/action/runbook_url, value, silence link). No custom
+#   template here: the chart runs Helm templating over this map and every
+#   Grafana `{ { } }` would need escaping.
+# - Provisioned contact points and policies are read-only in the UI. Removing
+#   one here does not delete it from Grafana: list it under
+#   `deleteContactPoints` / `resetPolicies` for one deploy.
+# - Telegram (critical only) and email are not here yet: Telegram waits for a
+#   bot token in the Secret, email for an SMTP relay. Add a receiver, then a
+#   `severity=critical` route to it.
+# - Night mute for landing-silent: `muteTimes` block below is a template,
+#   commented out until the reporting hours are known. A wrong window hides a
+#   real outage.
+alerting:
+  connectivity-notifications.yaml:
+    apiVersion: 1
+
+    contactPoints:
+      - orgId: 1
+        name: connectivity-slack
+        receivers:
+          - uid: conn-slack
+            type: slack
+            disableResolveMessage: false
+            settings:
+              url: $SLACK_WEBHOOK_URL
+              username: Grafana
+              icon_emoji: ':rotating_light:'
+
+    policies:
+      - orgId: 1
+        receiver: connectivity-slack
+        group_by: ['grafana_folder', 'alertname']
+        group_wait: 30s
+        group_interval: 5m
+        repeat_interval: 4h
+        routes:
+          # Connectivity pipeline: one Slack thread per rule and service.
+          # Warnings repeat every 4 h (inherited); criticals nag hourly.
+          - receiver: connectivity-slack
+            object_matchers:
+              - ['family', '=', 'connectivity']
+            group_by: ['alertname', 'service']
+            routes:
+              - receiver: connectivity-slack
+                object_matchers:
+                  - ['severity', '=', 'critical']
+                repeat_interval: 1h
+                continue: false
+              # landing-silent at night: uncomment and set the window once
+              # the reporting hours are known (see muteTimes below).
+              # - receiver: connectivity-slack
+              #   object_matchers:
+              #     - ['alertname', '=', 'landing-silent']
+              #   mute_time_intervals:
+              #     - nights
+
+    # muteTimes:
+    #   - orgId: 1
+    #     name: nights
+    #     time_intervals:
+    #       - location: America/Mexico_City
+    #         times:
+    #           - start_time: '23:00'
+    #             end_time: '06:00'

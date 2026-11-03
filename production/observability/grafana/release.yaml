@@ -23,8 +23,17 @@ spec:
     - kind: ConfigMap
       name: grafana-alerting-values
       valuesKey: connectivity-rules.yaml
+    - kind: ConfigMap
+      name: grafana-alerting-values
+      valuesKey: connectivity-notifications.yaml
   values:
     fullnameOverride: grafana
+
+    # Webhook URLs and bot tokens for the contact points: every key of this
+    # Secret becomes an env var, expanded as `$NAME` in alerting/*.yaml. The
+    # Secret is created by hand on the cluster, never committed (see
+    # alerting/connectivity-notifications.yaml for the command).
+    envFromSecret: grafana-alerting-secrets
 
     datasources:
       datasources.yaml:
