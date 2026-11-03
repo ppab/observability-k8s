@@ -34,6 +34,10 @@ spec:
         memory: 512Mi
 
     ports:
+      # Internal telemetry listens on ${MY_POD_IP}:8888 by chart default; the
+      # Service must expose it for Prometheus's `otel-collector` scrape job.
+      metrics:
+        enabled: true
       jaeger-compact:
         enabled: false
       jaeger-thrift:
