@@ -33,9 +33,12 @@
 # - Telegram (critical only) and email are not here yet: Telegram waits for a
 #   bot token in the Secret, email for an SMTP relay. Add a receiver, then a
 #   `severity=critical` route to it.
-# - Night mute for landing-silent: `muteTimes` block below is a template,
-#   commented out until the reporting hours are known. A wrong window hides a
-#   real outage.
+# - Night mute for landing-silent: nothing reports between 23:00 and 06:00
+#   Mexico City, so "no event landed in 15 min" is normal then. The window
+#   runs to 06:20 because the rule looks back 15 min and group_wait adds
+#   30 s: a mute ending at 06:00 sharp would notify at 06:00 for the empty
+#   05:45-06:00 window. Only the notification is muted; the rule still shows
+#   firing in Grafana, and a resolved message is not sent for a muted firing.
 alerting:
   connectivity-notifications.yaml:
     apiVersion: 1
@@ -67,24 +70,31 @@ alerting:
               - ['family', '=', 'connectivity']
             group_by: ['alertname', 'service']
             routes:
+              # landing-silent is expected at night (see muteTimes). It is
+              # critical, so it sits BEFORE the severity route: the first
+              # matching route wins and the critical one does not continue.
+              - receiver: connectivity-slack
+                object_matchers:
+                  - ['alertname', '=', 'landing-silent']
+                mute_time_intervals:
+                  - nights
+                repeat_interval: 1h
+                continue: false
               - receiver: connectivity-slack
                 object_matchers:
                   - ['severity', '=', 'critical']
                 repeat_interval: 1h
                 continue: false
-              # landing-silent at night: uncomment and set the window once
-              # the reporting hours are known (see muteTimes below).
-              # - receiver: connectivity-slack
-              #   object_matchers:
-              #     - ['alertname', '=', 'landing-silent']
-              #   mute_time_intervals:
-              #     - nights
 
-    # muteTimes:
-    #   - orgId: 1
-    #     name: nights
-    #     time_intervals:
-    #       - location: America/Mexico_City
-    #         times:
-    #           - start_time: '23:00'
-    #             end_time: '06:00'
+    muteTimes:
+      - orgId: 1
+        name: nights
+        time_intervals:
+          - location: America/Mexico_City
+            # A range cannot cross midnight (provisioning refuses the file),
+            # hence two ranges; 24:00 is the accepted end of a day.
+            times:
+              - start_time: '23:00'
+                end_time: '24:00'
+              - start_time: '00:00'
+                end_time: '06:20'
