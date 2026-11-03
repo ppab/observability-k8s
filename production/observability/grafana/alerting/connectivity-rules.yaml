@@ -1,0 +1,579 @@
+# Grafana alert rules for the connectivity pipeline, provisioned as code.
+#
+# Source of truth for the signals: monitor-platform
+#   docs/connectivity/hardening-plan.md, Phase 2 #1 (the rules table) — every
+#   series name below was verified against this Prometheus on 2026-11-02, and
+#   the `job` label values are the constants in
+#   src/features/connectivity/service-names.ts.
+#
+# How it is applied: this file is a Helm values fragment. The grafana
+# kustomization turns it into the ConfigMap `grafana-alerting-values`, and the
+# HelmRelease merges it through `valuesFrom`; the chart writes each key under
+# `alerting:` to /etc/grafana/provisioning/alerting/ and Grafana loads it at
+# start (a values change restarts the pod).
+#
+# Rules of the file:
+# - Every rule is one instant PromQL query (A) and one threshold (C), never a
+#   PromQL comparison: a comparison that filters to nothing is "no data", not
+#   "normal". Liveness rules use absent_over_time(), which returns 1 only while
+#   the series has been gone for the whole window, so `noDataState: OK` is the
+#   healthy case for them; collector-silent is the one rule where no data is
+#   itself the alarm.
+# - Counters appear only after their first increment; the services prime the
+#   watched rows at 0 on boot (monitor-platform cec6183a7), so increase() sees
+#   the first event. `noDataState: OK` on the counter rules relies on that and
+#   on the *-silent rules covering a service that exports nothing.
+# - Annotations carry no Grafana templating on purpose: the chart runs Helm
+#   templating over this map and every `{ }` would need escaping. The
+#   notification template prints the labels.
+# - Provisioned rules are read-only in the UI. Removing a rule here does not
+#   delete it from Grafana: list its uid under `deleteRules` for one deploy.
+# - Not here yet (hardening plan Phase 2 #3, waits for the alarm platform):
+#   alarm-evaluator-silent and the per-rule `monitor_alarm_state` rules.
+#
+# Thresholds to tune after the first weeks: landing-lag (1000 records),
+# delivery-stuck (1 h warn / 4 h critical). `landing-silent` fires at night if
+# nothing reports then; the fix is a mute timing on the notification policy
+# (Phase 2 #2), not a weaker rule.
+alerting:
+  connectivity-rules.yaml:
+    apiVersion: 1
+    groups:
+    - orgId: 1
+      name: connectivity
+      folder: Connectivity
+      interval: 1m
+      rules:
+      - uid: conn-inbound-503
+        title: inbound-503
+        condition: C
+        data:
+        - refId: A
+          relativeTimeRange:
+            from: 600
+            to: 0
+          datasourceUid: prometheus
+          model:
+            refId: A
+            expr: sum by (route) (increase(gateway_requests_total{job="connectivity-http-inbound",status="503"}[5m]))
+            instant: true
+            intervalMs: 1000
+            maxDataPoints: 43200
+        - refId: C
+          datasourceUid: __expr__
+          model:
+            refId: C
+            type: threshold
+            expression: A
+            conditions:
+            - evaluator:
+                type: gt
+                params:
+                - 0
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          family: connectivity
+          service: connectivity-http-inbound
+        annotations:
+          summary: 'The inbound answered 503 in the last 5 minutes: Kafka unreachable from the edge.'
+          action: Check the broker; confirm with Monnit whether the window was retried (I2).
+          runbook_url: https://bitbucket.org/monitorappio/monitor-platform/src/develop/docs/connectivity/hardening-plan.md
+        isPaused: false
+      - uid: conn-inbound-unhealthy
+        title: inbound-unhealthy
+        condition: C
+        data:
+        - refId: A
+          relativeTimeRange:
+            from: 600
+            to: 0
+          datasourceUid: prometheus
+          model:
+            refId: A
+            expr: absent_over_time(gateway_auth_snapshot_age_milliseconds{job="connectivity-http-inbound"}[10m])
+            instant: true
+            intervalMs: 1000
+            maxDataPoints: 43200
+        - refId: C
+          datasourceUid: __expr__
+          model:
+            refId: C
+            type: threshold
+            expression: A
+            conditions:
+            - evaluator:
+                type: gt
+                params:
+                - 0
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          family: connectivity
+          service: connectivity-http-inbound
+        annotations:
+          summary: 'No metrics from the inbound for 10 minutes: the process is gone or not exporting.'
+          action: ECS task events for the inbound; then the broker.
+          runbook_url: https://bitbucket.org/monitorappio/monitor-platform/src/develop/docs/connectivity/hardening-plan.md
+        isPaused: false
+      - uid: conn-landing-silent
+        title: landing-silent
+        condition: C
+        data:
+        - refId: A
+          relativeTimeRange:
+            from: 600
+            to: 0
+          datasourceUid: prometheus
+          model:
+            refId: A
+            expr: sum(increase(domain_events_landed_total[15m])) or vector(0)
+            instant: true
+            intervalMs: 1000
+            maxDataPoints: 43200
+        - refId: C
+          datasourceUid: __expr__
+          model:
+            refId: C
+            type: threshold
+            expression: A
+            conditions:
+            - evaluator:
+                type: lt
+                params:
+                - 1
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          family: connectivity
+          service: connectivity-flows-worker
+        annotations:
+          summary: 'No domain event landed in 15 minutes: inbound, Kafka or landing stopped.'
+          action: Walk the three /health endpoints (inbound, flows worker, outbound); operator's guide
+            section 7.4.
+          runbook_url: https://bitbucket.org/monitorappio/monitor-platform/src/develop/docs/connectivity/hardening-plan.md
+        isPaused: false
+      - uid: conn-landing-paused
+        title: landing-paused
+        condition: C
+        data:
+        - refId: A
+          relativeTimeRange:
+            from: 600
+            to: 0
+          datasourceUid: prometheus
+          model:
+            refId: A
+            expr: max by (flow_name, shard_name) (flow_shard_phase{phase="paused"} or flow_performer_phase{phase="paused"})
+            instant: true
+            intervalMs: 1000
+            maxDataPoints: 43200
+        - refId: C
+          datasourceUid: __expr__
+          model:
+            refId: C
+            type: threshold
+            expression: A
+            conditions:
+            - evaluator:
+                type: gt
+                params:
+                - 0
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          family: connectivity
+          service: connectivity-flows-worker
+        annotations:
+          summary: 'A landing shard has been paused for 5 minutes: DB outage or a poison batch.'
+          action: 'Flows sheet: read the shard reason. Phase 0 #1 makes a poison batch finite.'
+          runbook_url: https://bitbucket.org/monitorappio/monitor-platform/src/develop/docs/connectivity/hardening-plan.md
+        isPaused: false
+      - uid: conn-landing-fatal
+        title: landing-fatal
+        condition: C
+        data:
+        - refId: A
+          relativeTimeRange:
+            from: 600
+            to: 0
+          datasourceUid: prometheus
+          model:
+            refId: A
+            expr: max by (flow_name, shard_name) (flow_shard_phase{phase="fatal"} or flow_performer_phase{phase="fatal"})
+            instant: true
+            intervalMs: 1000
+            maxDataPoints: 43200
+        - refId: C
+          datasourceUid: __expr__
+          model:
+            refId: C
+            type: threshold
+            expression: A
+            conditions:
+            - evaluator:
+                type: gt
+                params:
+                - 0
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          family: connectivity
+          service: connectivity-flows-worker
+        annotations:
+          summary: 'A landing shard is fatal: the consumer crashed.'
+          action: ECS replaces the task; find out why in the task's log stream.
+          runbook_url: https://bitbucket.org/monitorappio/monitor-platform/src/develop/docs/connectivity/hardening-plan.md
+        isPaused: false
+      - uid: conn-landing-lag
+        title: landing-lag
+        condition: C
+        data:
+        - refId: A
+          relativeTimeRange:
+            from: 600
+            to: 0
+          datasourceUid: prometheus
+          model:
+            refId: A
+            expr: max by (group, topic) (kafka_consumer_lag)
+            instant: true
+            intervalMs: 1000
+            maxDataPoints: 43200
+        - refId: C
+          datasourceUid: __expr__
+          model:
+            refId: C
+            type: threshold
+            expression: A
+            conditions:
+            - evaluator:
+                type: gt
+                params:
+                - 1000
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          family: connectivity
+          service: connectivity-flows-worker
+        annotations:
+          summary: 'Kafka consumer lag above 1000 records for 10 minutes: landing slower than ingest.'
+          action: Batching doc; add a partition or a worker.
+          runbook_url: https://bitbucket.org/monitorappio/monitor-platform/src/develop/docs/connectivity/hardening-plan.md
+        isPaused: false
+      - uid: conn-job-dead
+        title: job-dead
+        condition: C
+        data:
+        - refId: A
+          relativeTimeRange:
+            from: 600
+            to: 0
+          datasourceUid: prometheus
+          model:
+            refId: A
+            expr: max by (consumer) (event_jobs_backlog{status="dead"})
+            instant: true
+            intervalMs: 1000
+            maxDataPoints: 43200
+        - refId: C
+          datasourceUid: __expr__
+          model:
+            refId: C
+            type: threshold
+            expression: A
+            conditions:
+            - evaluator:
+                type: gt
+                params:
+                - 0
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          family: connectivity
+          service: connectivity-http-outbound
+        annotations:
+          summary: 'A consumer has dead jobs: the target rejected them or retries ran out.'
+          action: 'Event jobs: Subjects, head, requeue or discard.'
+          runbook_url: https://bitbucket.org/monitorappio/monitor-platform/src/develop/docs/connectivity/hardening-plan.md
+        isPaused: false
+      - uid: conn-delivery-rejected
+        title: delivery-rejected
+        condition: C
+        data:
+        - refId: A
+          relativeTimeRange:
+            from: 600
+            to: 0
+          datasourceUid: prometheus
+          model:
+            refId: A
+            expr: sum by (consumer) (increase(delivery_attempts_total{outcome="reject"}[5m]))
+            instant: true
+            intervalMs: 1000
+            maxDataPoints: 43200
+        - refId: C
+          datasourceUid: __expr__
+          model:
+            refId: C
+            type: threshold
+            expression: A
+            conditions:
+            - evaluator:
+                type: gt
+                params:
+                - 0
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          family: connectivity
+          service: connectivity-http-outbound
+        annotations:
+          summary: The delivery target rejected a job in the last 5 minutes (4xx that is not auth).
+          action: Read the attempt's response excerpt on the head; fix the payload or the route.
+          runbook_url: https://bitbucket.org/monitorappio/monitor-platform/src/develop/docs/connectivity/hardening-plan.md
+        isPaused: false
+      - uid: conn-delivery-unauthorized
+        title: delivery-unauthorized
+        condition: C
+        data:
+        - refId: A
+          relativeTimeRange:
+            from: 600
+            to: 0
+          datasourceUid: prometheus
+          model:
+            refId: A
+            expr: sum by (consumer) (increase(delivery_attempts_total{outcome="defer"}[5m]))
+            instant: true
+            intervalMs: 1000
+            maxDataPoints: 43200
+        - refId: C
+          datasourceUid: __expr__
+          model:
+            refId: C
+            type: threshold
+            expression: A
+            conditions:
+            - evaluator:
+                type: gt
+                params:
+                - 0
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          family: connectivity
+          service: connectivity-http-outbound
+        annotations:
+          summary: 'The delivery target answered 401/403: the credential was revoked or rotated.'
+          action: 'Rotate the credential (Phase 3 #5); until then edit the task definition and redeploy.'
+          runbook_url: https://bitbucket.org/monitorappio/monitor-platform/src/develop/docs/connectivity/hardening-plan.md
+        isPaused: false
+      - uid: conn-delivery-stuck
+        title: delivery-stuck
+        condition: C
+        data:
+        - refId: A
+          relativeTimeRange:
+            from: 600
+            to: 0
+          datasourceUid: prometheus
+          model:
+            refId: A
+            expr: max by (consumer) (event_jobs_oldest_age_seconds)
+            instant: true
+            intervalMs: 1000
+            maxDataPoints: 43200
+        - refId: C
+          datasourceUid: __expr__
+          model:
+            refId: C
+            type: threshold
+            expression: A
+            conditions:
+            - evaluator:
+                type: gt
+                params:
+                - 3600
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          family: connectivity
+          service: connectivity-http-outbound
+        annotations:
+          summary: The oldest undelivered job is older than one hour.
+          action: Attention list; then the subject's head.
+          runbook_url: https://bitbucket.org/monitorappio/monitor-platform/src/develop/docs/connectivity/hardening-plan.md
+        isPaused: false
+      - uid: conn-delivery-stuck-critical
+        title: delivery-stuck-critical
+        condition: C
+        data:
+        - refId: A
+          relativeTimeRange:
+            from: 600
+            to: 0
+          datasourceUid: prometheus
+          model:
+            refId: A
+            expr: max by (consumer) (event_jobs_oldest_age_seconds)
+            instant: true
+            intervalMs: 1000
+            maxDataPoints: 43200
+        - refId: C
+          datasourceUid: __expr__
+          model:
+            refId: C
+            type: threshold
+            expression: A
+            conditions:
+            - evaluator:
+                type: gt
+                params:
+                - 14400
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          family: connectivity
+          service: connectivity-http-outbound
+        annotations:
+          summary: The oldest undelivered job is older than four hours.
+          action: Attention list; then the subject's head. Page.
+          runbook_url: https://bitbucket.org/monitorappio/monitor-platform/src/develop/docs/connectivity/hardening-plan.md
+        isPaused: false
+      - uid: conn-collector-silent
+        title: collector-silent
+        condition: C
+        data:
+        - refId: A
+          relativeTimeRange:
+            from: 600
+            to: 0
+          datasourceUid: prometheus
+          model:
+            refId: A
+            expr: up{job="otel-collector"}
+            instant: true
+            intervalMs: 1000
+            maxDataPoints: 43200
+        - refId: C
+          datasourceUid: __expr__
+          model:
+            refId: C
+            type: threshold
+            expression: A
+            conditions:
+            - evaluator:
+                type: lt
+                params:
+                - 1
+        for: 10m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: critical
+          family: connectivity
+          service: otel-collector
+        annotations:
+          summary: 'Prometheus cannot scrape the OTel Collector: observability itself is down.'
+          action: The collector pod (single replica, no persistent queue); every other rule is blind meanwhile.
+          runbook_url: https://bitbucket.org/monitorappio/monitor-platform/src/develop/docs/connectivity/hardening-plan.md
+        isPaused: false
+      - uid: conn-flows-worker-silent
+        title: flows-worker-silent
+        condition: C
+        data:
+        - refId: A
+          relativeTimeRange:
+            from: 600
+            to: 0
+          datasourceUid: prometheus
+          model:
+            refId: A
+            expr: absent_over_time(flow_shard_phase{job="connectivity-flows-worker"}[10m])
+            instant: true
+            intervalMs: 1000
+            maxDataPoints: 43200
+        - refId: C
+          datasourceUid: __expr__
+          model:
+            refId: C
+            type: threshold
+            expression: A
+            conditions:
+            - evaluator:
+                type: gt
+                params:
+                - 0
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          family: connectivity
+          service: connectivity-flows-worker
+        annotations:
+          summary: 'No metrics from the flows worker for 10 minutes: the process is gone or not exporting.'
+          action: ECS task events for the flows worker; then the collector.
+          runbook_url: https://bitbucket.org/monitorappio/monitor-platform/src/develop/docs/connectivity/hardening-plan.md
+        isPaused: false
+      - uid: conn-outbound-silent
+        title: outbound-silent
+        condition: C
+        data:
+        - refId: A
+          relativeTimeRange:
+            from: 600
+            to: 0
+          datasourceUid: prometheus
+          model:
+            refId: A
+            expr: absent_over_time(delivery_attempts_total[10m])
+            instant: true
+            intervalMs: 1000
+            maxDataPoints: 43200
+        - refId: C
+          datasourceUid: __expr__
+          model:
+            refId: C
+            type: threshold
+            expression: A
+            conditions:
+            - evaluator:
+                type: gt
+                params:
+                - 0
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          family: connectivity
+          service: connectivity-http-outbound
+        annotations:
+          summary: 'No metrics from the outbound for 10 minutes: the process is gone or not exporting.'
+          action: ECS task events for the outbound; then the collector.
+          runbook_url: https://bitbucket.org/monitorappio/monitor-platform/src/develop/docs/connectivity/hardening-plan.md
+        isPaused: false

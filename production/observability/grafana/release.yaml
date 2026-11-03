@@ -17,6 +17,12 @@ spec:
         name: grafana-community
         namespace: observability
       interval: 1h
+  # Alert rules, contact points and policies are provisioned as code from
+  # alerting/*.yaml (see kustomization.yaml); each file is a values fragment.
+  valuesFrom:
+    - kind: ConfigMap
+      name: grafana-alerting-values
+      valuesKey: connectivity-rules.yaml
   values:
     fullnameOverride: grafana
 
