@@ -9,5 +9,10 @@ configMapGenerator:
   - name: grafana-alerting-values
     files:
       - connectivity-rules.yaml=alerting/connectivity-rules.yaml
+  # Dashboards: one ConfigMap per provider, mounted by the chart at
+  # /var/lib/grafana/dashboards/<provider> (see dashboardsConfigMaps in release.yaml).
+  - name: grafana-dashboards-connectivity
+    files:
+      - connectivity.json=dashboards/connectivity.json
 generatorOptions:
   disableNameSuffixHash: true

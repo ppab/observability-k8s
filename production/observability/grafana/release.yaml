@@ -49,6 +49,25 @@ spec:
               nodeGraph:
                 enabled: true
 
+    # Dashboards as code: dashboards/*.json, one provider (= one ConfigMap) per
+    # folder. Provisioned dashboards cannot be saved from the UI; "Save as copy"
+    # to experiment, then bring the JSON back here.
+    dashboardProviders:
+      dashboardproviders.yaml:
+        apiVersion: 1
+        providers:
+          - name: connectivity
+            orgId: 1
+            folder: Connectivity
+            type: file
+            disableDeletion: true
+            editable: true
+            allowUiUpdates: false
+            options:
+              path: /var/lib/grafana/dashboards/connectivity
+    dashboardsConfigMaps:
+      connectivity: grafana-dashboards-connectivity
+
     ingress:
       enabled: true
       ingressClassName: traefik
