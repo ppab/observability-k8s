@@ -170,7 +170,7 @@ alerting:
           datasourceUid: prometheus
           model:
             refId: A
-            expr: max by (flow_name, shard_name) (flow_shard_phase{phase="paused"} or flow_performer_phase{phase="paused"})
+            expr: max by (flow_name, work_lane_name) (flow_work_lane_phase{phase="paused"} or flow_performer_phase{phase="paused"})
             instant: true
             intervalMs: 1000
             maxDataPoints: 43200
@@ -193,8 +193,8 @@ alerting:
           family: connectivity
           service: connectivity-flows-worker
         annotations:
-          summary: 'A landing shard has been paused for 5 minutes: DB outage or a poison batch.'
-          action: 'Flows sheet: read the shard reason. Phase 0 #1 makes a poison batch finite.'
+          summary: 'A landing work lane has been paused for 5 minutes: DB outage or a poison batch.'
+          action: 'Flows sheet: read the work lane reason. Phase 0 #1 makes a poison batch finite.'
           runbook_url: https://bitbucket.org/monitorappio/monitor-platform/src/develop/docs/connectivity/hardening-plan.md
         isPaused: false
       - uid: conn-landing-fatal
@@ -208,7 +208,7 @@ alerting:
           datasourceUid: prometheus
           model:
             refId: A
-            expr: max by (flow_name, shard_name) (flow_shard_phase{phase="fatal"} or flow_performer_phase{phase="fatal"})
+            expr: max by (flow_name, work_lane_name) (flow_work_lane_phase{phase="fatal"} or flow_performer_phase{phase="fatal"})
             instant: true
             intervalMs: 1000
             maxDataPoints: 43200
@@ -231,7 +231,7 @@ alerting:
           family: connectivity
           service: connectivity-flows-worker
         annotations:
-          summary: 'A landing shard is fatal: the consumer crashed.'
+          summary: 'A landing work lane is fatal: the consumer crashed.'
           action: ECS replaces the task; find out why in the task's log stream.
           runbook_url: https://bitbucket.org/monitorappio/monitor-platform/src/develop/docs/connectivity/hardening-plan.md
         isPaused: false
@@ -512,7 +512,7 @@ alerting:
           datasourceUid: prometheus
           model:
             refId: A
-            expr: absent_over_time(flow_shard_phase{job="connectivity-flows-worker"}[10m])
+            expr: absent_over_time(flow_work_lane_phase{job="connectivity-flows-worker"}[10m])
             instant: true
             intervalMs: 1000
             maxDataPoints: 43200

@@ -409,7 +409,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "(sum(flow_shard_phase{phase=~\"paused|fatal\"}) or vector(0)) + (sum(flow_performer_phase{phase=~\"paused|fatal\"}) or vector(0))",
+          "expr": "(sum(flow_work_lane_phase{phase=~\"paused|fatal\"}) or vector(0)) + (sum(flow_performer_phase{phase=~\"paused|fatal\"}) or vector(0))",
           "instant": true,
           "range": false
         }
@@ -1176,7 +1176,7 @@
       "id": 18,
       "type": "timeseries",
       "title": "Batch failures / min",
-      "description": "Batch-level failures by stage. Transient ones retry; the rest pause the shard after the policy's limit.",
+      "description": "Batch-level failures by stage. Transient ones retry; the rest pause the work lane after the policy's limit.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1276,7 +1276,7 @@
       "id": 19,
       "type": "table",
       "title": "Shard phases",
-      "description": "Current host phase of every shard. paused: read the reason in the Flows sheet; fatal: the consumer crashed.",
+      "description": "Current host phase of every work lane. paused: read the reason in the Flows sheet; fatal: the consumer crashed.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1294,7 +1294,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max by (flow_name, shard_name, phase) (flow_shard_phase == 1)",
+          "expr": "max by (flow_name, work_lane_name, phase) (flow_work_lane_phase == 1)",
           "instant": true,
           "range": false,
           "format": "table"
