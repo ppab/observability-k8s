@@ -947,7 +947,7 @@
       "id": 16,
       "type": "timeseries",
       "title": "Items by result / min",
-      "description": "Every item a batch settled: done = landed, duplicate = already seen, the rest carry a reason (dead letters).",
+      "description": "Every Flow input a take advanced: done = landed, duplicate = already seen, the rest carry a reason (dead letters).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1107,7 +1107,7 @@
       "id": 17,
       "type": "timeseries",
       "title": "Batch duration p95 by flow",
-      "description": "Take-to-settle time per batch.",
+      "description": "Take-to-advance time per take.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1949,7 +1949,7 @@
       "id": 26,
       "type": "timeseries",
       "title": "Delivery duration",
-      "description": "Time for one call to monitor-server to settle.",
+      "description": "Time for one call to monitor-server to finish.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
